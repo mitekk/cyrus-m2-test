@@ -31,10 +31,12 @@ Follow the steps in order. Do not skip steps to save tokens; the working agent a
    - Migrations without rollback (schema changes, data migrations, irreversible filesystem operations).
    - Hidden state mutations (functions named like getters that mutate, or pure-looking code that touches global state).
    - Logic gates that always evaluate to one branch (dead conditionals).
-6. **Decide and post.**
-   - If **any** AC is unmet OR tests fail OR any heuristic flag fires: post `gh pr review --request-changes` with a structured body listing each finding by category.
-   - If all AC are met AND tests pass AND no heuristic flag fires: post `gh pr review --approve` with a one-paragraph summary of what you verified.
-   - Do not post more than one review per run. Do not post a draft, a comment, or a partial.
+6. **Decide and post via the Bash tool — REQUIRED.** Your turn is not done until a top-level review has been posted on the PR by invoking the Bash tool. The action's post-step at the end of the workflow posts only buffered inline comments — it does NOT post top-level reviews. The only way a `gh pr review --approve` or `--request-changes` appears on the PR is for you to literally invoke the Bash tool and run the command. Writing out the command as text without invoking Bash does not count and leaves the PR un-reviewed.
+   - If **any** AC is unmet OR tests fail OR any heuristic flag fires: invoke Bash to run `gh pr review <PR_NUMBER_OR_URL> --request-changes --body "$(cat <<'GH_PR_REVIEW_EOF' … GH_PR_REVIEW_EOF\n)"` with your structured findings in the body.
+   - If all AC are met AND tests pass AND no heuristic flag fires: invoke Bash to run `gh pr review <PR_NUMBER_OR_URL> --approve --body "<one-paragraph summary of what you verified>"`.
+   - For trivial PRs (docs-only changes, single-line additions, M2-warmup proof-of-life): this step still applies. Invoke `gh pr review … --approve` with a one-sentence body noting the trivial scope. Do not skip the post step on the grounds that the change is too small to merit a review — the absence of a posted review is indistinguishable from a reviewer outage.
+   - The PR number is available in the runner environment as `$PR_NUMBER` (the action sets it). Use `gh pr review "$PR_NUMBER" --approve …` or pass the PR URL directly.
+   - Do not post more than one review per run. Do not post a draft, a comment, or a partial. Do not edit the PR. Do not push.
 
 ## Tool allowlist
 
