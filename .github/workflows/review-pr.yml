@@ -2,30 +2,28 @@
 #
 # Rendered by terraform/github.tf's `github_repository_file.review_pr_workflow`
 # resource, one per active project (for_each = local.active_projects).
-# Source-of-truth for the prompt body is `.github/reviewer-prompt.md` —
-# rendered by the sibling templatefile reviewer-prompt.md.tftpl from the
-# in-repo `prompts/_global/reviewer.md`.
 #
 # Template vars:
-#   mitekk — the project manifest's github.org (cyrus's branch-prefix matcher)
+#   ${gh_owner} — the project manifest's github.org (cyrus's branch-prefix matcher)
 #
 # Why the branch-prefix filter exists: Phase 2 Step 3's Commit E surfaced
 # (Lessons #36-#39) that cyrus emits PRs on branches shaped
 # `<gh-owner>/<lin-id-lower>-<slug>` (e.g. mitekk/mit-5-m2-warmup), with
-# `cyrusdevelopment-orchest/...` also seen in some setups. We only want
-# the reviewer to fire on PRs the working-agent opens — not on human-
-# opened PRs (those go through human review). The filter rejects the
-# latter without spending action minutes.
+# `cyrusdevelopment-orchest/...` also seen in some setups.
 #
-# anthropics/claude-code-action@v1 input contract (verified empirically
-# at MIT-13's first run, see Lesson #47):
-#   - prompt:           inline string (no `prompt_file` input exists)
-#   - claude_args:      passthrough to claude CLI (--model, --max-turns,
-#                       --allowed-tools, etc.)
-#   - anthropic_api_key: repo secret
-#   - github_token:     defaults to ${{ github.token }} (no override)
-# Permissions: needs `id-token: write` for OIDC token fetch (in addition
-# to contents:read + pull-requests:write).
+# Prompt-shape design (Lesson #47 + iter-5 finding):
+#   The action's `prompt:` input is the user-message-equivalent under the
+#   claude_code system preset. If we pass the full reviewer document body
+#   as the prompt, claude reads it as "here's a document about a reviewer"
+#   and asks for clarification instead of executing. Iterations 1-4 fought
+#   this by tightening the document's framing (second-person imperative,
+#   "execute now," explicit Bash requirement); claude still found the file
+#   on disk and identified the message as documentation about the file.
+#
+#   The fix: pass a SHORT IMPERATIVE TASK as `prompt:` and reference the
+#   full procedure as a document claude reads via the Read tool. The task
+#   is "review this PR, follow the procedure"; the document is reference
+#   material, not the conversation message.
 #
 # DO NOT hand-edit on the project repo. Terraform's overwrite_on_create=true
 # will revert the edit on the next `terraform apply`. To change shape,
@@ -38,8 +36,6 @@ on:
     types: [opened, synchronize]
 
 concurrency:
-  # Suppress duplicate fires when `synchronize` lands while a prior run
-  # is still in flight. One review per PR-at-a-time.
   group: review-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
@@ -47,10 +43,6 @@ jobs:
   review:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Only review PRs from the working-agent's branch shape (ADR-0017).
-    # If cyrus's upstream branch convention drifts, this filter goes
-    # silently — m2-verify's `m2-state.reviewer-run-completed` catches
-    # the regression on the next exercise.
     if: |
       startsWith(github.event.pull_request.head.ref, 'mitekk/') ||
       startsWith(github.event.pull_request.head.ref, 'cyrusdevelopment-orchest/')
@@ -67,36 +59,26 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0   # so the reviewer can walk git log
 
-      - name: Load reviewer prompt body
-        # anthropics/claude-code-action@v1 expects an inline `prompt`
-        # string, not a file path. Read the TF-pushed prompt file into
-        # GITHUB_OUTPUT using a unique multiline delimiter so the prompt's
-        # own EOF markers (in its example heredocs) don't collide.
-        id: load-prompt
-        run: |
-          {
-            echo 'body<<REVIEWER_PROMPT_END_OF_BODY'
-            cat .github/reviewer-prompt.md
-            echo 'REVIEWER_PROMPT_END_OF_BODY'
-          } >> "$GITHUB_OUTPUT"
-
       - name: Run adversarial reviewer
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          prompt: ${{ steps.load-prompt.outputs.body }}
-          # Model + tool allowlist + max-turns pass through to the
-          # underlying claude CLI via the v1 action's claude_args input
-          # (separate `model`/`allowed_tools`/`max_turns` inputs from
-          # earlier action versions do not exist in v1 — see Lesson #47).
+          # Short imperative task — references the procedure document
+          # rather than embedding it. See the "Prompt-shape design" comment
+          # block above for why this beats inlining the full document body.
+          prompt: |
+            Perform an adversarial code review of pull request #${{ github.event.pull_request.number }} in this repository.
+
+            Read `.github/reviewer-prompt.md` first — it contains the review procedure (hard rules, step-by-step, output shape, and tool allowlist). Then execute that procedure against this PR's diff right now.
+
+            Required final action: invoke the Bash tool to run exactly one of:
+              gh pr review "$PR_NUMBER" --approve --body "<one-paragraph summary>"
+            OR
+              gh pr review "$PR_NUMBER" --request-changes --body "<your findings>"
+
+            Text-only responses do not count as a review and leave the PR un-reviewed. You MUST invoke the Bash tool to post the review before your turn ends. Do not ask clarifying questions — execute the procedure now.
           claude_args: --model claude-sonnet-4-6 --max-turns 15 --allowed-tools Read,Bash,Grep,Glob
-          # Observability for the Phase 2 Step 4 ramp: with these off, the
-          # claude turn content is hidden from the Actions log and the only
-          # PR-visible signal is the green/red check. Enabled while the
-          # reviewer-prompt iteration is still settling (per MIT-13's
-          # `num_turns: 1` no-tool-use run). Once the prompt reliably drives
-          # `gh pr review` posting, consider flipping these back off to
-          # reduce log noise + prevent the diff-thread from accumulating
-          # one sticky-comment per PR cycle.
+          # Observability for the Phase 2 Step 4 ramp. Flip off once the
+          # reviewer is stable + posting reliably.
           show_full_output: "true"
           display_report: "true"
