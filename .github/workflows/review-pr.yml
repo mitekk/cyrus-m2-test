@@ -90,3 +90,13 @@ jobs:
           # (separate `model`/`allowed_tools`/`max_turns` inputs from
           # earlier action versions do not exist in v1 — see Lesson #47).
           claude_args: --model claude-sonnet-4-6 --max-turns 15 --allowed-tools Read,Bash,Grep,Glob
+          # Observability for the Phase 2 Step 4 ramp: with these off, the
+          # claude turn content is hidden from the Actions log and the only
+          # PR-visible signal is the green/red check. Enabled while the
+          # reviewer-prompt iteration is still settling (per MIT-13's
+          # `num_turns: 1` no-tool-use run). Once the prompt reliably drives
+          # `gh pr review` posting, consider flipping these back off to
+          # reduce log noise + prevent the diff-thread from accumulating
+          # one sticky-comment per PR cycle.
+          show_full_output: "true"
+          display_report: "true"
