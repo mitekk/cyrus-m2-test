@@ -1,0 +1,66 @@
+# GitHub Actions: adversarial PR reviewer (ADR-0017).
+#
+# Rendered by terraform/github.tf's `github_repository_file.review_pr_workflow`
+# resource, one per active project (for_each = local.active_projects).
+# Source-of-truth for the prompt body is `.github/reviewer-prompt.md` —
+# rendered by the sibling templatefile reviewer-prompt.md.tftpl from the
+# in-repo `prompts/_global/reviewer.md`.
+#
+# Template vars:
+#   mitekk — the project manifest's github.org (cyrus's branch-prefix matcher)
+#
+# Why the branch-prefix filter exists: Phase 2 Step 3's Commit E surfaced
+# (Lessons #36-#39) that cyrus emits PRs on branches shaped
+# `<gh-owner>/<lin-id-lower>-<slug>` (e.g. mitekk/mit-5-m2-warmup), with
+# `cyrusdevelopment-orchest/...` also seen in some setups. We only want
+# the reviewer to fire on PRs the working-agent opens — not on human-
+# opened PRs (those go through human review). The filter rejects the
+# latter without spending action minutes.
+#
+# DO NOT hand-edit on the project repo. Terraform's overwrite_on_create=true
+# will revert the edit on the next `terraform apply`. To change shape,
+# edit this template + re-run apply.
+
+name: Adversarial PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+concurrency:
+  # Suppress duplicate fires when `synchronize` lands while a prior run
+  # is still in flight. One review per PR-at-a-time.
+  group: review-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Only review PRs from the working-agent's branch shape (ADR-0017).
+    # If cyrus's upstream branch convention drifts, this filter goes
+    # silently — m2-verify's `m2-state.reviewer-run-completed` catches
+    # the regression on the next exercise.
+    if: |
+      startsWith(github.event.pull_request.head.ref, 'mitekk/') ||
+      startsWith(github.event.pull_request.head.ref, 'cyrusdevelopment-orchest/')
+
+    permissions:
+      contents: read
+      pull-requests: write   # required for `gh pr review`
+
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0   # so the reviewer can walk git log
+
+      - name: Run adversarial reviewer
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          model: claude-sonnet-4-6
+          allowed_tools: "Read,Bash,Grep,Glob"
+          max_turns: 15
+          prompt_file: .github/reviewer-prompt.md
