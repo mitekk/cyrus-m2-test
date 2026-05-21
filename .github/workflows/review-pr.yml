@@ -17,6 +17,16 @@
 # opened PRs (those go through human review). The filter rejects the
 # latter without spending action minutes.
 #
+# anthropics/claude-code-action@v1 input contract (verified empirically
+# at MIT-13's first run, see Lesson #47):
+#   - prompt:           inline string (no `prompt_file` input exists)
+#   - claude_args:      passthrough to claude CLI (--model, --max-turns,
+#                       --allowed-tools, etc.)
+#   - anthropic_api_key: repo secret
+#   - github_token:     defaults to ${{ github.token }} (no override)
+# Permissions: needs `id-token: write` for OIDC token fetch (in addition
+# to contents:read + pull-requests:write).
+#
 # DO NOT hand-edit on the project repo. Terraform's overwrite_on_create=true
 # will revert the edit on the next `terraform apply`. To change shape,
 # edit this template + re-run apply.
@@ -48,6 +58,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write   # required for `gh pr review`
+      id-token: write        # required by anthropics/claude-code-action@v1 for OIDC
 
     steps:
       - name: Checkout PR head
@@ -56,11 +67,26 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0   # so the reviewer can walk git log
 
+      - name: Load reviewer prompt body
+        # anthropics/claude-code-action@v1 expects an inline `prompt`
+        # string, not a file path. Read the TF-pushed prompt file into
+        # GITHUB_OUTPUT using a unique multiline delimiter so the prompt's
+        # own EOF markers (in its example heredocs) don't collide.
+        id: load-prompt
+        run: |
+          {
+            echo 'body<<REVIEWER_PROMPT_END_OF_BODY'
+            cat .github/reviewer-prompt.md
+            echo 'REVIEWER_PROMPT_END_OF_BODY'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Run adversarial reviewer
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          model: claude-sonnet-4-6
-          allowed_tools: "Read,Bash,Grep,Glob"
-          max_turns: 15
-          prompt_file: .github/reviewer-prompt.md
+          prompt: ${{ steps.load-prompt.outputs.body }}
+          # Model + tool allowlist + max-turns pass through to the
+          # underlying claude CLI via the v1 action's claude_args input
+          # (separate `model`/`allowed_tools`/`max_turns` inputs from
+          # earlier action versions do not exist in v1 — see Lesson #47).
+          claude_args: --model claude-sonnet-4-6 --max-turns 15 --allowed-tools Read,Bash,Grep,Glob
