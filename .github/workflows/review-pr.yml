@@ -78,7 +78,10 @@ jobs:
 
             Text-only responses do not count as a review and leave the PR un-reviewed. You MUST invoke the Bash tool to post the review before your turn ends. Do not ask clarifying questions — execute the procedure now.
           claude_args: --model claude-sonnet-4-6 --max-turns 15 --allowed-tools Read,Bash,Grep,Glob
-          # Observability for the Phase 2 Step 4 ramp. Flip off once the
-          # reviewer is stable + posting reliably.
-          show_full_output: "true"
-          display_report: "true"
+          # Observability scaffolding from Phase 2 Step 4 ramp. Kept explicit
+          # (over deletion) so the toggles are discoverable if a future
+          # reviewer regression needs the full action log back. Flipped off
+          # at Phase 4 Step 1 after 3 post-fix-clean reviewer cycles
+          # (MIT-13 iter-5+, MIT-14, MIT-15) confirmed substantive reviews.
+          show_full_output: "false"
+          display_report: "false"
